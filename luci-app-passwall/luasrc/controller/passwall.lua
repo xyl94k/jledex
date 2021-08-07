@@ -10,6 +10,7 @@ local util = require "luci.util"
 local i18n = require "luci.i18n"
 local kcptun = require("luci.model.cbi." .. appname ..".api.kcptun")
 local brook = require("luci.model.cbi." .. appname ..".api.brook")
+local v2ray = require("luci.model.cbi." .. appname ..".api.v2ray")
 local xray = require("luci.model.cbi." .. appname ..".api.xray")
 local trojan_go = require("luci.model.cbi." .. appname ..".api.trojan_go")
 
@@ -40,6 +41,7 @@ function index()
 	entry({"admin", "services", appname, "node_config"}, cbi(appname .. "/client/node_config")).leaf = true
 	entry({"admin", "services", appname, "shunt_rules"}, cbi(appname .. "/client/shunt_rules")).leaf = true
 	entry({"admin", "services", appname, "acl"}, cbi(appname .. "/client/acl"), _("Access control"), 98).leaf = true
+	entry({"admin", "services", appname, "acl_config"}, cbi(appname .. "/client/acl_config")).leaf = true
 	entry({"admin", "services", appname, "log"}, form(appname .. "/client/log"), _("Watch Logs"), 999).leaf = true
 
 	--[[ Server ]]
@@ -72,6 +74,8 @@ function index()
 	entry({"admin", "services", appname, "kcptun_update"}, call("kcptun_update")).leaf = true
 	entry({"admin", "services", appname, "brook_check"}, call("brook_check")).leaf = true
 	entry({"admin", "services", appname, "brook_update"}, call("brook_update")).leaf = true
+	entry({"admin", "services", appname, "v2ray_check"}, call("v2ray_check")).leaf = true
+	entry({"admin", "services", appname, "v2ray_update"}, call("v2ray_update")).leaf = true
 	entry({"admin", "services", appname, "xray_check"}, call("xray_check")).leaf = true
 	entry({"admin", "services", appname, "xray_update"}, call("xray_update")).leaf = true
 	entry({"admin", "services", appname, "trojan_go_check"}, call("trojan_go_check")).leaf = true
@@ -84,7 +88,8 @@ local function http_write_json(content)
 end
 
 function reset_config()
-	luci.sys.call('[ -f "/rom/etc/config/passwall" ] && cp -f /rom/etc/config/passwall /etc/config/passwall && /etc/init.d/passwall reload')
+	luci.sys.call('/etc/init.d/passwall stop')
+	luci.sys.call('[ -f "/usr/share/passwall/0_default_config" ] && cp -f /usr/share/passwall/0_default_config /etc/config/passwall')
 	luci.http.redirect(api.url())
 end
 
@@ -176,13 +181,13 @@ function status()
 	local e = {}
 	e.dns_mode_status = luci.sys.call("netstat -apn | grep ':7913 ' >/dev/null") == 0
 	e.haproxy_status = luci.sys.call(string.format("top -bn1 | grep -v grep | grep '%s/bin/' | grep haproxy >/dev/null", appname)) == 0
-	e["kcptun_tcp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v grep | grep '%s/bin/kcptun' | grep -i 'tcp' >/dev/null", appname)) == 0
-	e["tcp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|kcptun' | grep '%s/bin/' | grep -i 'TCP' >/dev/null", appname)) == 0
+	e["kcptun_tcp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|acl/|acl_' | grep '%s/bin/kcptun' | grep -i 'tcp' >/dev/null", appname)) == 0
+	e["tcp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|kcptun|acl/|acl_' | grep '%s/bin/' | grep -i 'TCP' >/dev/null", appname)) == 0
 
 	if (ucic:get(appname, "@global[0]", "udp_node") or "nil") == "tcp" then
 		e["udp_node_status"] = e["tcp_node_status"]
 	else
-		e["udp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v grep | grep '%s/bin/' | grep -i 'UDP' >/dev/null", appname)) == 0
+		e["udp_node_status"] = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|acl/|acl_' | grep '%s/bin/' | grep -i 'UDP' >/dev/null", appname)) == 0
 	end
 	luci.http.prepare_content("application/json")
 	luci.http.write_json(e)
@@ -193,12 +198,12 @@ function socks_status()
 	local index = luci.http.formvalue("index")
 	local id = luci.http.formvalue("id")
 	e.index = index
-	e.socks_status = luci.sys.call(string.format("top -bn1 | grep -v grep | grep '%s/bin/' | grep '%s' | grep 'SOCKS_' > /dev/null", appname, id)) == 0
+	e.socks_status = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|acl/|acl_' | grep '%s/bin/' | grep '%s' | grep 'SOCKS_' > /dev/null", appname, id)) == 0
 	local use_http = ucic:get(appname, id, "http_port") or 0
 	e.use_http = 0
 	if tonumber(use_http) > 0 then
 		e.use_http = 1
-		e.http_status = luci.sys.call(string.format("top -bn1 | grep -v grep | grep '%s/bin/' | grep '%s' | grep -E 'HTTP_|HTTP2SOCKS' > /dev/null", appname, id)) == 0
+		e.http_status = luci.sys.call(string.format("top -bn1 | grep -v -E 'grep|acl/|acl_' | grep '%s/bin/' | grep '%s' | grep -E 'HTTP_|HTTP2SOCKS' > /dev/null", appname, id)) == 0
 	end
 	luci.http.prepare_content("application/json")
 	luci.http.write_json(e)
@@ -281,6 +286,10 @@ function clear_all_nodes()
 	ucic:foreach(appname, "haproxy_config", function(t)
 		ucic:delete(appname, t[".name"])
 	end)
+	ucic:foreach(appname, "acl_rule", function(t)
+		ucic:set(appname, t[".name"], "tcp_node", "nil")
+		ucic:set(appname, t[".name"], "udp_node", "nil")
+	end)
 	ucic:foreach(appname, "nodes", function(node)
 		ucic:delete(appname, node['.name'])
 	end)
@@ -312,6 +321,14 @@ function delete_select_nodes()
 		ucic:foreach(appname, "haproxy_config", function(t)
 			if t["lbss"] == w then
 				ucic:delete(appname, t[".name"])
+			end
+		end)
+		ucic:foreach(appname, "acl_rule", function(t)
+			if t["tcp_node"] == w then
+				ucic:set(appname, t[".name"], "tcp_node", "nil")
+			end
+			if t["udp_node"] == w then
+				ucic:set(appname, t[".name"], "udp_node", "nil")
 			end
 		end)
 		ucic:delete(appname, w)
@@ -415,6 +432,25 @@ function brook_update()
 		json = brook.to_move(http.formvalue("file"))
 	else
 		json = brook.to_download(http.formvalue("url"))
+	end
+
+	http_write_json(json)
+end
+
+function v2ray_check()
+	local json = v2ray.to_check("")
+	http_write_json(json)
+end
+
+function v2ray_update()
+	local json = nil
+	local task = http.formvalue("task")
+	if task == "extract" then
+		json = v2ray.to_extract(http.formvalue("file"), http.formvalue("subfix"))
+	elseif task == "move" then
+		json = v2ray.to_move(http.formvalue("file"))
+	else
+		json = v2ray.to_download(http.formvalue("url"))
 	end
 
 	http_write_json(json)
