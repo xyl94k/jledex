@@ -64,7 +64,7 @@ define Package/xray-geodata
 endef
 
 define Package/xray/description
-  Xray, Penetrates Everything. Also the best v2ray-core, with XTLS support. Fully compatible configuration.
+  Xray, Penetrates Everything. It helps you to build your own computer network.
   It secures your network connections and thus protects your privacy.
 endef
 
@@ -94,6 +94,7 @@ config XRAY_CORE_COMPRESS_GOPROXY
 
 config XRAY_CORE_COMPRESS_UPX
 	bool "Compress executable files with UPX"
+	depends on !mips64
 	default y
 endmenu
 endef
@@ -156,9 +157,6 @@ define Package/xray-core/install
 	$(INSTALL_CONF) $(CURDIR)/files/xray.conf $(1)/etc/config/xray
 	$(INSTALL_DIR) $(1)/etc/init.d/
 	$(INSTALL_BIN) $(CURDIR)/files/xray.init $(1)/etc/init.d/xray
-
-	$(INSTALL_DIR) $(1)/etc/capabilities/
-	$(INSTALL_DATA) $(CURDIR)/files/xray.capabilities $(1)/etc/capabilities/xray.json
 endef
 
 define Package/xray-example/install
