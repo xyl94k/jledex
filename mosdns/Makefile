@@ -1,80 +1,98 @@
-# SPDX-License-Identifier: GPL-3.0-only
 #
-# Copyright (C) 2021 ImmortalWrt.org
+# Copyright (C) 2019 OpenWrt.org
+#
+# KFERMercer <KFER.Mercer@gmail.com>
+#
+# This is free software, licensed under the GNU General Public License v3.
+#
 
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=mosdns
-PKG_VERSION:=20f7604
-PKG_RELEASE:=$(AUTORELEASE)
-
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://codeload.github.com/IrineSistiana/mosdns/tar.gz/$(PKG_VERSION)?
-PKG_HASH:=skip
-
-PKG_LICENSE:=GPL-3.0
-PKG_LICENSE_FILE:=LICENSE
-PKG_MAINTAINER:=Tianling Shen <cnsztl@immortalwrt.org>
-
-PKG_CONFIG_DEPENDS:= \
-	CONFIG_MOSDNS_COMPRESS_GOPROXY \
-	CONFIG_MOSDNS_COMPRESS_UPX
-
-PKG_BUILD_DEPENDS:=golang/host
-PKG_BUILD_PARALLEL:=1
-PKG_USE_MIPS16:=0
-
-GO_PKG:=github.com/IrineSistiana/mosdns
-GO_PKG_LDFLAGS:=-s -w
-GO_PKG_LDFLAGS_X:=main.version=$(PKG_VERSION)
+PKG_NAME:=MosDNS
+PKG_VERSION:=v3.2.0
+PKG_RELEASE:=4
 
 include $(INCLUDE_DIR)/package.mk
-include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
-define Package/mosdns/Default
-  SECTION:=net
-  CATEGORY:=Network
-  SUBMENU:=IP Addresses and Names
-  TITLE:=A plug-in DNS forwarder/splitter
-  URL:=https://github.com/IrineSistiana/mosdns
+define Package/$(PKG_NAME)
+	SECTION:=net
+	CATEGORY:=Network
+	TITLE:=MosDNS is a low laterncy DNS client support DoH/DoT
+	URL:=https://github.com/IrineSistiana/mosdns
 endef
 
-define Package/mosdns
-  $(call Package/mosdns/Default)
-  DEPENDS:=$(GO_ARCH_DEPENDS)
+
+define Package/$(PKG_NAME)/description
+MosDNS is a low laterncy DNS client support DoH/DoT
 endef
 
-define Package/mosdns/config
-config MOSDNS_COMPRESS_GOPROXY
-	bool "Compiling with GOPROXY proxy"
-	default n
+# 禁止OpenWrt对二进制文件进行strip
+STRIP:=true
 
-config MOSDNS_COMPRESS_UPX
-	bool "Compress executable files with UPX"
-	default y
-endef
-
-ifeq ($(CONFIG_MOSDNS_COMPRESS_GOPROXY),y)
-	export GO111MODULE=on
-	export GOPROXY=https://goproxy.baidu.com
+ifeq ($(ARCH),i386)
+	PKG_ARCH_MOSDNS:=86
+	PKG_HASH:=skip
 endif
+
+ifeq ($(ARCH),x86_64)
+	PKG_ARCH_MOSDNS:=amd64
+	PKG_HASH:=c1cafb32a2096d071cb231acd3b7ed00debb18700c5317555ba8c065c1bad266
+endif
+
+ifeq ($(ARCH),mips64el)
+	PKG_ARCH_MOSDNS:=mips64-hardfloat
+	PKG_HASH:=skip
+endif
+
+ifeq ($(ARCH),mipsel)
+	PKG_ARCH_MOSDNS:=mipsle-softfloat
+	PKG_HASH:=c9de4ee0e8cfb1c61238865aa6016c851e52dabe6c3e65523b2950a2e4670759
+endif
+
+ifeq ($(ARCH),mips)
+	PKG_ARCH_MOSDNS:=mipsle-softfloat
+	PKG_HASH:=c9de4ee0e8cfb1c61238865aa6016c851e52dabe6c3e65523b2950a2e4670759
+endif
+
+ifeq ($(ARCH),arm)
+	PKG_ARCH_MOSDNS:=arm-7
+	PKG_HASH:=skip
+endif
+
+ifeq ($(ARCH),aarch64)
+	PKG_ARCH_MOSDNS:=arm64
+	PKG_HASH:=skip
+endif
+
+
+PKG_SOURCE:=mosdns-linux-$(PKG_ARCH_MOSDNS).zip
+
+# https://github.com/IrineSistiana/mosdns/releases/download/v1.0.0-rc1/mos-chinadns-linux-mipsle-softfloat.zip
+PKG_SOURCE_URL:=https://github.com/IrineSistiana/mosdns/releases/download/$(PKG_VERSION)/
+
+UNZIP_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)/$(PKG_NAME)-unzip
+
 
 define Build/Prepare
-	$(call Build/Prepare/Default)
+	mkdir -vp $(UNZIP_DIR)
+	unzip -od $(UNZIP_DIR) $(DL_DIR)/$(PKG_SOURCE)
+	wget -O $(UNZIP_DIR)/geosite.dat https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat
+	wget -O $(UNZIP_DIR)/geoip.dat https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/geoip.dat
 endef
 
-GO_PKG_TARGET_VARS:=$(filter-out CGO_ENABLED=%,$(GO_PKG_TARGET_VARS)) CGO_ENABLED=0
+define Build/Configure
+endef
 
 define Build/Compile
-	$(call GoPackage/Build/Compile)
-ifneq ($(CONFIG_MOSDNS_COMPRESS_UPX),)
-	$(STAGING_DIR_HOST)/bin/upx --lzma --best $(GO_PKG_BUILD_BIN_DIR)/mosdns
-endif
 endef
 
-define Package/mosdns/install
-	$(call GoPackage/Package/Install/Bin,$(1))
+define Package/$(PKG_NAME)/install
+	$(INSTALL_DIR) $(1)/usr/bin
+	mkdir $(1)/usr/bin/$(PKG_NAME)
+	$(INSTALL_BIN) $(UNZIP_DIR)/mosdns $(1)/usr/bin/$(PKG_NAME)/$(PKG_NAME)
+	cp $(UNZIP_DIR)/geosite.dat $(1)/usr/bin/$(PKG_NAME)/geosite.dat
+	cp $(UNZIP_DIR)/geoip.dat $(1)/usr/bin/$(PKG_NAME)/geoip.dat
+	chmod 755 $(1)/usr/bin/$(PKG_NAME)
 endef
 
-$(eval $(call GoBinPackage,mosdns))
-$(eval $(call BuildPackage,mosdns))
+$(eval $(call BuildPackage,$(PKG_NAME)))
